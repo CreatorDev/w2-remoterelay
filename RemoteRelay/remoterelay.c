@@ -57,13 +57,13 @@ AwaResult handler(AwaStaticClient * client, AwaOperation operation, AwaObjectID 
                     relay[objectInstanceID].Outputstate = newState;
                     if (relay[objectInstanceID].Outputstate)
                     {
-                        led_switch_on(ALL_LEDS);
-                        relay2_click_enable_relay_1(MIKROBUS_1);
+                        led_switch_on(ALL_LEDS);                                        // Actions taken when state changes to true
+                        relay2_click_enable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1);    //
                     }
                     else
                     {
-                        led_switch_off(ALL_LEDS);
-                        relay2_click_disable_relay_1(MIKROBUS_1);
+                        led_switch_off(ALL_LEDS);                                       // Actions taken when state changes to false
+                        relay2_click_disable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1);   //
                     }
 
                     result = AwaResult_SuccessChanged;

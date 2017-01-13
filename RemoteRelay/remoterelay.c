@@ -1,179 +1,107 @@
-#include <string.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <time.h>
+#include <signal.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+#include <awa/common.h>
+#include <awa/client.h>
+
 #include <letmecreate/letmecreate.h>
-#include <awa/static.h>
 
-#define RELAY_INSTANCES 1
+#define OPERATION_PERFORM_TIMEOUT   (1000)
 
-/**Define DeviceDetails Object**/
-typedef struct
+static AwaClientSession * session;
+
+static volatile bool running = true;
+
+static void exit_program(int __attribute__ ((unused))signo)
 {
-    char Manufacturer[64];
-
-} DeviceDetailsObject;
-
-static DeviceDetailsObject device[1];
-
-/**Define Relay Object**/
-typedef struct
-{
-    AwaBoolean Outputstate;
-
-} RelayObject;
-
-static RelayObject relay[RELAY_INSTANCES];
-
-/**Handler that takes action when the Relay Object or Resource is created/changed**/
-AwaResult handler(AwaStaticClient * client, AwaOperation operation, AwaObjectID objectID,
-                  AwaObjectInstanceID objectInstanceID, AwaResourceID resourceID, AwaResourceInstanceID resourceInstanceID,
-                  void ** dataPointer, size_t * dataSize, bool * changed)
-{
-    AwaResult result = AwaResult_InternalError;
-    if ((objectID == 3201) && (objectInstanceID >= 0) && (objectInstanceID < RELAY_INSTANCES))
-    {
-        switch (operation)
-        {   
-            case AwaOperation_CreateObjectInstance:
-            {
-                memset(&relay[objectInstanceID], 0, sizeof(relay[objectInstanceID]));
-                result = AwaResult_SuccessCreated;
-                break;
-            }
-            case AwaOperation_CreateResource:
-            {
-                relay[objectInstanceID].Outputstate = false; 
-                result = AwaResult_SuccessCreated;
-                break;
-            }
-            case AwaOperation_Write:
-            {
-                AwaBoolean newState = **((AwaBoolean **)dataPointer);
-                if (newState != relay[objectInstanceID].Outputstate)
-                {
-                    *changed = true;
-                    relay[objectInstanceID].Outputstate = newState;
-                    if (relay[objectInstanceID].Outputstate)
-                    {
-                        led_switch_on(ALL_LEDS);                                        // Actions taken when state changes to true
-                        relay2_click_enable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1);    //
-                    }
-                    else
-                    {
-                        led_switch_off(ALL_LEDS);                                       // Actions taken when state changes to false
-                        relay2_click_disable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1);   //
-                    }
-
-                    result = AwaResult_SuccessChanged;
-                }
-                break;
-            }
-            case AwaOperation_Read:
-            {
-                *dataPointer = &relay[objectInstanceID].Outputstate;
-                *dataSize = sizeof(relay[objectInstanceID].Outputstate);
-                result = AwaResult_SuccessContent;
-                break;
-            }
-            default:
-                result = AwaResult_InternalError;
-                break;
-        }
-    }
-    return result;
+    running = false;
 }
 
-/**Define IPSO Objects**/
-static void DefineDeviceDetailsObject(AwaStaticClient * awaClient)
+/* Definition of the Digital Output IPSO object */
+static void DefineRelayObject(void)
 {
-    AwaStaticClient_DefineObject(awaClient, 3, "DeviceDetails", 0, 1);
-    AwaStaticClient_DefineResource(awaClient, 3, 0, "Manufacturer", AwaResourceType_String, 0, 1, AwaResourceOperations_ReadOnly);
-    AwaStaticClient_SetResourceStorageWithPointer(awaClient, 3, 0, &device[0].Manufacturer, sizeof(device[0].Manufacturer), sizeof(device[0]));
+    AwaObjectDefinition * objectDefinition = AwaObjectDefinition_New(3201, "Digital Output", 0, 1);
+    AwaObjectDefinition_AddResourceDefinitionAsBoolean(objectDefinition, 5550, "Relay", false, AwaResourceOperations_ReadWrite, false);
+
+    AwaClientDefineOperation * operation = AwaClientDefineOperation_New(session);
+    AwaClientDefineOperation_Add(operation, objectDefinition);
+    AwaClientDefineOperation_Perform(operation, OPERATION_PERFORM_TIMEOUT);
+    AwaClientDefineOperation_Free(&operation);
 }
 
-static void DefineRelayObject(AwaStaticClient * awaClient)
+/* Create LWM2M Instances and Resources */
+static void SetInitialValues(void)
 {
-    AwaStaticClient_DefineObject(awaClient, 3201, "Digital Output", 0, RELAY_INSTANCES);
-    AwaStaticClient_DefineResource(awaClient, 3201, 5550, "Relay",  AwaResourceType_Boolean, 0, 1, AwaResourceOperations_ReadWrite);
-    AwaStaticClient_SetResourceStorageWithPointer(awaClient, 3201, 5550, &relay[0].Outputstate, sizeof(relay[0].Outputstate), sizeof(relay[0]));
-    AwaStaticClient_SetResourceOperationHandler(awaClient, 3201, 5550, handler);
+    AwaClientSetOperation * operation = AwaClientSetOperation_New(session);
+
+    AwaClientSetOperation_CreateObjectInstance(operation, "/3201/0");
+    AwaClientSetOperation_CreateOptionalResource(operation, "/3201/0/5550");
+
+    AwaClientSetOperation_Perform(operation, OPERATION_PERFORM_TIMEOUT);
+    AwaClientSetOperation_Free(&operation);
 }
 
-static void SetInitialValues(AwaStaticClient * awaClient)
- {
-    int instance = 0;
- 
-    AwaStaticClient_CreateObjectInstance(awaClient, 3201, instance);
-    AwaStaticClient_CreateObjectInstance(awaClient, 3, instance);
- 
-    AwaStaticClient_CreateResource(awaClient, 3, instance, 0);
-    strcpy(device[instance].Manufacturer, "Creator Remote Relay");
- 
-    AwaStaticClient_CreateResource(awaClient, 3201, instance, 5550);
-    relay[instance].Outputstate = false;
-}
-
-bool ReadCertificate(const char *filePath, char **certificate)
+/* Callback funtion called when the resource changes */
+static void ChangeCallback(const AwaChangeSet * changeSet, void * context)
 {
-    size_t inputFileSize;
-    FILE *inputFile = fopen(filePath, "rb");
-    if (inputFile == NULL)
-    {
-        printf("Unable to open certificate file under: %s", filePath);
-        return false;
-    }
-    if (fseek(inputFile, 0, SEEK_END) != 0)
-    {
-        printf("Can't set file offset.");
-        return false;
-    }
-    inputFileSize = ftell(inputFile);
-    rewind(inputFile);
-    *certificate = malloc(inputFileSize * (sizeof(char)));
-    fread(*certificate, sizeof(char), inputFileSize, inputFile);
-    if (fclose(inputFile) == EOF)
-    {
-        printf("Couldn't close certificate file.");
-    }
-    return true;
+    const bool * value;
+    AwaChangeSet_GetValueAsBooleanPointer(changeSet, "/3201/0/5550", &value);
+    led_set(ALL_LEDS, *value ? ALL_LEDS : 0); // Turn LEDs on/off based on current resource value
+    if (*value)
+        relay2_click_enable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1); //Turn Relay on if resource is set to true
+    else
+        relay2_click_disable_relay(MIKROBUS_1, RELAY2_CLICK_RELAY_1); //Turn relay off if resource is not set to true
 }
 
 int main(void)
 {
+    /* Set signal handler to exit program when Ctrl+c is pressed */
+    struct sigaction action = {
+        .sa_handler = exit_program,
+        .sa_flags = 0
+    };
+    sigemptyset(&action.sa_mask);
+    sigaction (SIGINT, &action, NULL);
 
-    char *clientName = "Creator Remote Relay";
- 
-    srand(time(NULL));
-    int port = 6000 + (rand() % 32768);
- 
-    char *cert = NULL;
-    char *certFilePath = "/etc/config/creatorworkshop.crt"; // Path to Certificate file
+    /* Create and initialise client session */
+    session = AwaClientSession_New();
 
-    AwaStaticClient * awaClient = AwaStaticClient_New();
- 
-    AwaStaticClient_SetLogLevel(AwaLogLevel_Verbose);
-    AwaStaticClient_SetEndPointName(awaClient, clientName);
-    ReadCertificate(certFilePath, &cert);
-    AwaStaticClient_SetCertificate(awaClient, cert, strlen(cert), AwaSecurityMode_Certificate);
-    AwaStaticClient_SetCoAPListenAddressPort(awaClient, "0.0.0.0", port);
-    AwaStaticClient_SetBootstrapServerURI(awaClient, "coaps://deviceserver.creatordev.io:15684");
- 
-    AwaStaticClient_Init(awaClient);
- 
-    DefineRelayObject(awaClient);
-    DefineDeviceDetailsObject(awaClient);
-    SetInitialValues(awaClient);
+    /* Use default IPC configuration */
+    AwaClientSession_Connect(session);
 
+    /* Initialise LEDs for use in the callback */
     led_init();
 
-    while (1)
-    {
-        AwaStaticClient_Process(awaClient);
+    /* Set up LWM2M objects/instances/resources */
+    DefineRelayObject();
+    SetInitialValues();
+
+    /* Subscribe to resource, and tie the subscription to the "changeCallback" function */
+    AwaClientChangeSubscription * subscription = AwaClientChangeSubscription_New("/3201/0/5550", ChangeCallback, NULL);
+
+    /* Start listening to notifications */
+    AwaClientSubscribeOperation * subscribeOperation = AwaClientSubscribeOperation_New(session);
+    AwaClientSubscribeOperation_AddChangeSubscription(subscribeOperation, subscription);
+    AwaClientSubscribeOperation_Perform(subscribeOperation, OPERATION_PERFORM_TIMEOUT);
+    AwaClientSubscribeOperation_Free(&subscribeOperation);
+
+    while (running) {
+        AwaClientSession_Process(session, OPERATION_PERFORM_TIMEOUT);
+        AwaClientSession_DispatchCallbacks(session); // Trigger the callback if resource changes
     }
 
-    AwaStaticClient_Free(&awaClient);
+    /* Unsubscribe from resource */
+    AwaClientSubscribeOperation * cancelSubscribeOperation = AwaClientSubscribeOperation_New(session);
+    AwaClientSubscribeOperation_AddCancelChangeSubscription(cancelSubscribeOperation, subscription);
+    AwaClientSubscribeOperation_Perform(cancelSubscribeOperation, OPERATION_PERFORM_TIMEOUT);
+    AwaClientSubscribeOperation_Free(&cancelSubscribeOperation);
+
+    /* Free the change subscription */
+    AwaClientChangeSubscription_Free(&subscription);
+
+    AwaClientSession_Disconnect(session);
+    AwaClientSession_Free(&session);
 
     return 0;
 }

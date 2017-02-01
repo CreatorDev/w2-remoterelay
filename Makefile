@@ -2,18 +2,16 @@ include $(TOPDIR)/rules.mk
 
 # Name and release number of this package
 PKG_NAME:=remoterelay
-PKG_VERSION:=1.0.0
+PKG_VERSION:=2.0.0
 PKG_RELEASE:=1
-
-PKG_BUILD_DIR := $(BUILD_DIR)/$(PKG_NAME)
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/remoterelay
-	SECTION:=utils
-	CATEGORY:=Utilities
-	TITLE:=Remotely toggle relay
-	DEPENDS:=+awalwm2m +letmecreate
+  SECTION:=utils
+  CATEGORY:=Utilities
+  TITLE:=Remotely toggle relay
+  DEPENDS:=+awalwm2m +letmecreate
 endef
 
 define Package/remoterelay/description

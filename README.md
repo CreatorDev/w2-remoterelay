@@ -1,6 +1,6 @@
 ![logo](https://static.creatordev.io/logo-md-s.svg)
 
-----------
+[![Build Status](http://jenkins.creatordev.io/buildStatus/icon?job=CreatorDev/w2-remoterelay/master)](http://jenkins.creatordev.io/job/CreatorDev/job/w2-remoterelay/job/master/)
 
 # w2-remoterelay
 
